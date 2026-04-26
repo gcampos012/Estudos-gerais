@@ -1,0 +1,21 @@
+# Ambiente virtual
+gestao_portfolio/
+venv/
+env/
+.venv/
+.env
+
+# Cache do python
+__pycache__/
+*.pyc
+*.pyo
+
+# Config do VS CODE
+.vscode/
+
+# Sistema operacional
+.Ds_Store
+Thumbs.db
+
+# jupyter
+.ipynb_checkpoints/
