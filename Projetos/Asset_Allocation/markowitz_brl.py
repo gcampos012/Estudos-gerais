@@ -29,7 +29,7 @@ df["SALDO_ACUM_SELIC"] = 10000 * (df["SELIC"] / 100 + 1)
 
 # %%
 # Ativos brasileiros negociados na B3
-tickers_brl = ["DIVO11.SA", "IMAB11.SA", "B5P211.SA"]
+tickers_brl = ["DIVO11.SA", "IVVB11"]
 tickers = tickers_brl
 
 #%%
