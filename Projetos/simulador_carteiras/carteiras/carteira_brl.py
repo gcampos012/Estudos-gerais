@@ -62,9 +62,9 @@ CARTEIRA = {
             'descricao': 'ETF S&P 500 com hedge cambial (negociado em BRL)',
         },
         {
-            'ticker': 'WRLD11.SA',
+            'ticker': 'VT',
             'classe': 'rv_global_msci',
-            'descricao': 'ETF MSCI World (negociado em BRL)',
+            'descricao': 'ETF Vanguard Total (preço USD convertido para BRL)',
         },
 
          # ─── Commodities (USD convertido para BRL) ──────────────

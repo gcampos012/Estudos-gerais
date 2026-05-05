@@ -72,6 +72,16 @@ def _classificar_ticker(ticker: str) -> str:
     # Default: yfinance (cobre ações .SA, ETFs estrangeiros, etc)
     return 'yfinance'
 
+def _filtrar_por_data(df: pd.DataFrame, data_inicio: date, data_fim: date) -> pd.DataFrame:
+    """
+    Filtra um DataFrame pelo intervalo de datas (índice = data/timestamp).
+    
+    Converte data → Timestamp pra garantir compatibilidade com índices do pandas.
+    """
+    return df.loc[
+        pd.Timestamp(data_inicio):pd.Timestamp(data_fim)
+    ]
+
 # ============================================================
 # BLOCO 3 - LEITOR PARQUET ANBIMA (FROM MARKET_DATA)
 # ============================================================
@@ -203,7 +213,7 @@ def _baixar_bcb_multiplos(tickers: list[str], data_inicio: date, data_fim: date)
     # Tenta cache primeiro
     df_cache = _ler_cache_bcb(tickers)
     if df_cache is not None:
-        return df_cache
+        return _filtrar_por_data(df_cache, data_inicio, data_fim)
     
     # Cache inválido: baixa todas as séries (com chunking)
     print(f"🌐 Baixando {len(tickers)} série(s) do BCB: {tickers}")
@@ -243,13 +253,25 @@ def _baixar_bcb_multiplos(tickers: list[str], data_inicio: date, data_fim: date)
     
     # Junta todas as séries num DataFrame
     df_bcb = pd.DataFrame(series_dict)
-    
+
+    # 🆕 TRANSFORMA TAXAS EM ÍNDICES ACUMULADOS
+    # SELIC/CDI vêm como taxa diária em % (ex: 0.05 = 0.05% no dia)
+    # Convertemos pra índice acumulado começando em 1.0
+    # USD_BRL é cotação direta, não precisa transformar
+    TICKERS_TAXA = {'SELIC', 'CDI', 'IPCA'}  # tickers que vêm como taxa, não como preço
+
+    for col in df_bcb.columns:
+        if col in TICKERS_TAXA:
+            # Converte % em decimal e acumula
+            taxa_diaria_decimal = df_bcb[col] / 100
+            df_bcb[col] = (1 + taxa_diaria_decimal).cumprod()
+
     # Salva no cache
     _CACHE_BCB.parent.mkdir(parents=True, exist_ok=True)
     df_bcb.to_parquet(_CACHE_BCB)
     print(f"💾 Cache BCB atualizado em {_CACHE_BCB.name}")
-    
-    return df_bcb
+
+    return _filtrar_por_data(df_bcb, data_inicio, data_fim)
 
 # ============================================================
 # BLOCO 5 - BAIXAR PREÇOS DO YFINANCE, COM CACHE LOCAL 
@@ -308,7 +330,7 @@ def _baixar_yfinance(tickers: list[str], data_inicio: date, data_fim: date) -> p
     # Tenta usar cache primeiro
     df_cache = _ler_cache_yfinance(tickers)
     if df_cache is not None:
-        return df_cache
+        return _filtrar_por_data(df_cache, data_inicio, data_fim)
     
     # Cache inválido ou incompleto: baixa de novo
     print(f"🌐 Baixando {len(tickers)} tickers do yfinance: {tickers}")
@@ -343,8 +365,8 @@ def _baixar_yfinance(tickers: list[str], data_inicio: date, data_fim: date) -> p
     _CACHE_YFINANCE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(_CACHE_YFINANCE)
     print(f"💾 Cache atualizado em {_CACHE_YFINANCE.name}")
-    
-    return df
+
+    return _filtrar_por_data(df, data_inicio, data_fim)
 
 # ============================================================
 # BLOCO 6 - CONVERTER SÉRIE DE PREÇOS EM USD EM BRL 
@@ -446,7 +468,7 @@ def carregar_precos(
         print(f"\n[ANBIMA]")
         df_anbima = _ler_anbima(tickers_anbima)
         # Filtra pelo intervalo de datas
-        df_anbima = df_anbima.loc[data_inicio:data_fim]
+        df_anbima = _filtrar_por_data(df_anbima, data_inicio, data_fim)
         pedacos.append(df_anbima)
         print(f"🌐 Baixando dados de {len(tickers_anbima)} ativo(s)...")
         print(f"✅ {len(df_anbima)} registros encontrados, de {df_anbima.index.min().date()} até {df_anbima.index.max().date()}")
@@ -463,34 +485,33 @@ def carregar_precos(
     # yfinance
     df_yf = None
     if tickers_yfinance:
-       print(f"\n[YFINANCE]")
-       df_yf = _baixar_yfinance(tickers_yfinance, data_inicio, data_fim)
-
+        print(f"\n[YFINANCE]")
+        df_yf = _baixar_yfinance(tickers_yfinance, data_inicio, data_fim)
+    
     # ============================================================
     # FASE 3: Aplicar a conversão USD->BRL onde necessário
     # ============================================================
-
     if df_yf is not None:
-       # Detecta tickers sem .SA (assumidos como USD)
-       tickers_usd = [t for t in tickers_yfinance if not t.endswith('.SA')]
-
-    if tickers_usd:
-        print(f"\n[CONVERSÃO USD → BRL]")
-        print(f"   Tickers em USD: {tickers_usd}")
-
-        # garante que USD_BRL está disponível
-        if 'USD_BRL' in series_bcb:
-            cotacao = series_bcb['USD_BRL']
-        else:
-            df_usd = _baixar_bcb_multiplos(['USD_BRL'], data_inicio, data_fim)
-            cotacao = df_usd['USD_BRL'] 
-
-        # Converte cada ticker USD
-        for ticker in tickers_usd:
-            print(f"   🔄 Convertendo {ticker}...")
-            df_yf[ticker] = _converter_para_brl(df_yf[ticker], cotacao)
-    
-    pedacos.append(df_yf)
+        # Detecta tickers sem .SA (assumidos como USD)
+        tickers_usd = [t for t in tickers_yfinance if not t.endswith('.SA')]
+        
+        if tickers_usd:
+            print(f"\n[CONVERSÃO USD → BRL]")
+            print(f"   Tickers em USD: {tickers_usd}")
+            
+            # Garante que USD_BRL está disponível
+            if 'USD_BRL' in series_bcb:
+                cotacao = series_bcb['USD_BRL']
+            else:
+                df_usd = _baixar_bcb_multiplos(['USD_BRL'], data_inicio, data_fim)
+                cotacao = df_usd['USD_BRL']
+            
+            # Converte cada ticker USD
+            for ticker in tickers_usd:
+                print(f"   🔄 Convertendo {ticker}...")
+                df_yf[ticker] = _converter_para_brl(df_yf[ticker], cotacao)
+        
+        pedacos.append(df_yf)
 
     # ============================================================
     # FASE 4: Juntar tudo num DataFrame
