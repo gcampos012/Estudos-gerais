@@ -52,13 +52,20 @@ def main() -> None:
     )
     
     # ========================================================
-    # 3. CALCULAR TAXA LIVRE DE RISCO (CDI anualizado)
+    # 3. CALCULAR TAXA LIVRE DE RISCO (CDI anualizado NA JANELA DO MARKOWITZ)
     # ========================================================
-    serie_cdi = precos[benchmark].dropna()
-    n_anos = len(serie_cdi) / 252
-    cdi_anual = (serie_cdi.iloc[-1] / serie_cdi.iloc[0]) ** (1/n_anos) - 1
-    
-    print(f"\n💰 CDI anualizado no período: {cdi_anual:.2%}")
+    # Identifica primeiro dia onde TODOS os ativos têm dados
+    # (essa é a mesma janela que o Markowitz vai usar internamente)
+    janela_inicio = precos[ativos].dropna().index.min()
+
+    # Recorta CDI nessa janela pra calcular taxa anualizada COMPARÁVEL
+    serie_cdi_alinhada = precos[benchmark].loc[janela_inicio:].dropna()
+    n_anos = len(serie_cdi_alinhada) / 252
+    cdi_anual = (
+        serie_cdi_alinhada.iloc[-1] / serie_cdi_alinhada.iloc[0]
+    ) ** (1/n_anos) - 1
+
+    print(f"\n💰 CDI anualizado na janela ({janela_inicio.date()} → hoje): {cdi_anual:.2%}")
     
     # ========================================================
     # 4. RODAR MARKOWITZ
@@ -66,6 +73,7 @@ def main() -> None:
     resultado = calcular_fronteira_eficiente(
         precos=precos[ativos],
         taxa_livre_anual=cdi_anual,
+        seed=42,
     )
     
     # ========================================================

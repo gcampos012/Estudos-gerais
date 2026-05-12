@@ -151,8 +151,8 @@ def _ler_cache_bcb(tickers: list[str]) -> pd.DataFrame | None:
     Tenta ler o cache do BCB.
     
     Returns:
-        DataFrame se cache é válido E contém todos os tickers solicitados.
-        None caso contrário.
+        DataFrame se cache é válido E contém TODOS os tickers solicitados.
+        None se cache não existe, está desatualizado, ou falta algum ticker.
     """
     if not _cache_bcb_valido():
         return None
@@ -161,10 +161,22 @@ def _ler_cache_bcb(tickers: list[str]) -> pd.DataFrame | None:
     
     tickers_no_cache = set(df_cache.columns)
     if not set(tickers).issubset(tickers_no_cache):
-        return None  # falta algum ticker, precisa rebaixar
+        return None  # falta algum ticker
     
     print(f"💾 Cache BCB válido (gerado hoje), usando.")
     return df_cache[tickers]
+
+
+def _carregar_cache_bcb_existente() -> pd.DataFrame:
+    """
+    Carrega o cache BCB se for válido (do dia).
+    Retorna DataFrame vazio se não existir/estiver desatualizado.
+    
+    Diferente de _ler_cache_bcb: NÃO valida tickers, retorna o que tem.
+    """
+    if not _cache_bcb_valido():
+        return pd.DataFrame()
+    return pd.read_parquet(_CACHE_BCB)
 
 def _baixar_bcb_chunk(codigo: int, data_inicio: date, data_fim: date) -> pd.DataFrame:
     """
@@ -194,32 +206,48 @@ def _baixar_bcb_chunk(codigo: int, data_inicio: date, data_fim: date) -> pd.Data
     
     return df
 
-def _baixar_bcb_multiplos(tickers: list[str], data_inicio: date, data_fim: date) -> pd.DataFrame:
+def _baixar_bcb_multiplos(
+    tickers: list[str],
+    data_inicio: date,
+    data_fim: date,
+) -> pd.DataFrame:
     """
-    Baixa múltiplas séries do BCB com cache e chunking automático.
+    Baixa múltiplas séries do BCB com cache ACUMULATIVO e chunking automático.
     
-    Implementa cache "do dia" (igual yfinance): se já baixou hoje
-    com todos os tickers, usa o cache. Senão, baixa de novo.
+    Estratégia de cache:
+    - Se TODOS os tickers solicitados já estão no cache válido → usa cache
+    - Se alguns faltam → baixa SÓ os que faltam, mescla com o cache existente
+    - Cache acumula ao longo do dia (não sobrescreve)
     
     Args:
-        tickers: Lista de tickers conhecidos no BCB_CODIGOS
-                 (ex: ['SELIC', 'CDI', 'USD_BRL'])
+        tickers: Lista de tickers do BCB_CODIGOS
         data_inicio: Data inicial
         data_fim: Data final
     
     Returns:
-        DataFrame com colunas = tickers, índice = data, valores = taxa/cotação.
+        DataFrame com colunas = tickers solicitados, índice = data.
     """
-    # Tenta cache primeiro
+    # 1. Tenta cache completo primeiro (caso comum)
     df_cache = _ler_cache_bcb(tickers)
     if df_cache is not None:
         return _filtrar_por_data(df_cache, data_inicio, data_fim)
     
-    # Cache inválido: baixa todas as séries (com chunking)
-    print(f"🌐 Baixando {len(tickers)} série(s) do BCB: {tickers}")
+    # 2. Cache inválido ou incompleto - vamos investigar
+    cache_existente = _carregar_cache_bcb_existente()
     
-    series_dict = {}
-    for ticker in tickers:
+    if not cache_existente.empty:
+        # Cache existe e é do dia, mas faltam tickers - identifica o que falta
+        tickers_no_cache = set(cache_existente.columns)
+        tickers_faltando = [t for t in tickers if t not in tickers_no_cache]
+        print(f"💾 Cache BCB parcial: já tem {sorted(tickers_no_cache)}, falta {tickers_faltando}")
+    else:
+        # Cache não existe ou é de outro dia - baixa tudo
+        tickers_faltando = list(tickers)
+        print(f"🌐 Sem cache BCB válido, baixando {len(tickers_faltando)} série(s).")
+    
+    # 3. Baixa SÓ os tickers que faltam (com chunking)
+    series_novas = {}
+    for ticker in tickers_faltando:
         codigo = BCB_CODIGOS[ticker]
         print(f"   📊 {ticker} (código {codigo})...")
         
@@ -244,34 +272,34 @@ def _baixar_bcb_multiplos(tickers: list[str], data_inicio: date, data_fim: date)
         df_completo = pd.concat(chunks, ignore_index=True)
         df_completo = df_completo.drop_duplicates(subset=['data'])
         
-        # Guarda como Series com nome do ticker
-        series_dict[ticker] = pd.Series(
+        series_novas[ticker] = pd.Series(
             data=df_completo['valor'].values,
             index=df_completo['data'],
             name=ticker,
         )
     
-    # Junta todas as séries num DataFrame
-    df_bcb = pd.DataFrame(series_dict)
-
-    # 🆕 TRANSFORMA TAXAS EM ÍNDICES ACUMULADOS
-    # SELIC/CDI vêm como taxa diária em % (ex: 0.05 = 0.05% no dia)
-    # Convertemos pra índice acumulado começando em 1.0
-    # USD_BRL é cotação direta, não precisa transformar
-    TICKERS_TAXA = {'SELIC', 'CDI', 'IPCA'}  # tickers que vêm como taxa, não como preço
-
-    for col in df_bcb.columns:
+    df_novos = pd.DataFrame(series_novas)
+    
+    # 4. Aplica transformação de taxa em índice acumulado (SELIC/CDI)
+    TICKERS_TAXA = {'SELIC', 'CDI'}
+    for col in df_novos.columns:
         if col in TICKERS_TAXA:
-            # Converte % em decimal e acumula
-            taxa_diaria_decimal = df_bcb[col] / 100
-            df_bcb[col] = (1 + taxa_diaria_decimal).cumprod()
-
-    # Salva no cache
+            taxa_diaria_decimal = df_novos[col] / 100
+            df_novos[col] = (1 + taxa_diaria_decimal).cumprod()
+    
+    # 5. MESCLA com cache existente (não sobrescreve!)
+    if not cache_existente.empty:
+        df_atualizado = pd.concat([cache_existente, df_novos], axis=1)
+    else:
+        df_atualizado = df_novos
+    
+    # 6. Salva o cache acumulado
     _CACHE_BCB.parent.mkdir(parents=True, exist_ok=True)
-    df_bcb.to_parquet(_CACHE_BCB)
-    print(f"💾 Cache BCB atualizado em {_CACHE_BCB.name}")
-
-    return _filtrar_por_data(df_bcb, data_inicio, data_fim)
+    df_atualizado.to_parquet(_CACHE_BCB)
+    print(f"💾 Cache BCB atualizado (agora com: {sorted(df_atualizado.columns)})")
+    
+    # 7. Retorna apenas os tickers solicitados, filtrados por data
+    return _filtrar_por_data(df_atualizado[tickers], data_inicio, data_fim)
 
 # ============================================================
 # BLOCO 5 - BAIXAR PREÇOS DO YFINANCE, COM CACHE LOCAL 

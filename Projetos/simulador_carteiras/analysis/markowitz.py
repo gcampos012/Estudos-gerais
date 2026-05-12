@@ -124,6 +124,7 @@ def calcular_fronteira_eficiente(
     precos: pd.DataFrame,
     taxa_livre_anual: float,
     n_simulacoes: int = N_SIMULACOES_MARKOWITZ,
+    seed: int | None = None,
 ) -> dict:
     """
     Calcula a fronteira eficiente via Monte Carlo de pesos aleatórios.
@@ -145,6 +146,11 @@ def calcular_fronteira_eficiente(
     print(f"🎯 OTIMIZAÇÃO DE PORTFÓLIO (MARKOWITZ MONTE CARLO)")
     print("=" * 60)
     
+    # Reprodutibilidade: se seed fornecido, fixa a aleatoriedade
+    if seed is not None:
+        np.random.seed(seed)
+        print(f"🎲 Seed fixa: {seed} (resultados reprodutíveis)")
+
     # 1. Filtrar janela onde todos os ativos têm dados
     precos_validos = _filtrar_dados_validos(precos)
     

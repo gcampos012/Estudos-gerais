@@ -49,17 +49,23 @@ def main() -> None:
         data_fim=date.today(),
     )
     
-    # CDI anualizado pra Markowitz
-    serie_cdi = precos[benchmark].dropna()
-    n_anos = len(serie_cdi) / 252
-    cdi_anual = (serie_cdi.iloc[-1] / serie_cdi.iloc[0]) ** (1/n_anos) - 1
-    
-    print(f"\n💰 CDI anualizado: {cdi_anual:.2%}")
+    # Identifica janela onde todos os ativos têm dados
+    janela_inicio = precos[ativos].dropna().index.min()
+
+    # CDI anualizado NA MESMA JANELA dos ativos (comparável)
+    serie_cdi_alinhada = precos[benchmark].loc[janela_inicio:].dropna()
+    n_anos = len(serie_cdi_alinhada) / 252
+    cdi_anual = (
+        serie_cdi_alinhada.iloc[-1] / serie_cdi_alinhada.iloc[0]
+    ) ** (1/n_anos) - 1
+
+    print(f"\n💰 CDI anualizado na janela ({janela_inicio.date()} → hoje): {cdi_anual:.2%}")
     
     # Roda Markowitz pra extrair pesos ótimos
     resultado_markowitz = calcular_fronteira_eficiente(
         precos=precos[ativos],
         taxa_livre_anual=cdi_anual,
+        seed=42,
     )
     
     # ========================================================
@@ -101,16 +107,19 @@ def main() -> None:
         )
     
     # ========================================================
-    # 4. BACKTEST: CDI (BENCHMARK)
+    # 4. BACKTEST: CDI (BENCHMARK) - na mesma janela dos ativos
     # ========================================================
     print("\n" + "═" * 60)
     print("📊 BACKTEST: CDI (benchmark)")
     print("═" * 60)
-    
+
+    # Recorta CDI na mesma janela em que os ativos da carteira têm dados
+    precos_cdi_alinhado = precos[[benchmark]].loc[janela_inicio:]
+
     backtest_cdi = executar_backtest(
-        precos=precos[[benchmark]],
+        precos=precos_cdi_alinhado,
         pesos={benchmark: 1.0},
-        estrategia='buy_and_hold',  # CDI não rebalanceia
+        estrategia='buy_and_hold',
         valor_inicial=VALOR_INICIAL,
     )
     

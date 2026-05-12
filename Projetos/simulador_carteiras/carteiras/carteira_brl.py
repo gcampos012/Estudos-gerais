@@ -40,31 +40,21 @@ CARTEIRA = {
         {
             'ticker': 'IMA-B 5 P2',
             'classe': 'rf_inflacao_curta',
-            'descricao': 'NTN-B até 5 anos com controle de prazo médio (P2)',
-        },
-        {
-            'ticker': 'IRF-M',
-            'classe': 'rf_prefixado',
-            'descricao': 'Carteira teórica de LTN/NTN-F (prefixado)',
+            'descricao': 'Carteira teórica de NTN-B (prazos de até 5 anos)',
         },
 
         #─── Renda Variável Brasil ─────────────────────────────────────────
         {
             'ticker': 'DIVO11.SA',
-            'classe': 'rv_brasil_dividendos',
-            'descricao': 'ETF de ações brasileiras pagadoras de dividendos',
+            'classe': 'rv_brasil_total_return',
+            'descricao': 'ETF de ações brasileiras',
         },
         
         # ─── Renda Variável Internacional (em BRL) ──────────────
         {
-            'ticker': 'IVVB11.SA',
-            'classe': 'rv_eua_sp500',
-            'descricao': 'ETF S&P 500 com hedge cambial (negociado em BRL)',
-        },
-        {
             'ticker': 'VT',
-            'classe': 'rv_global_msci',
-            'descricao': 'ETF Vanguard Total (preço USD convertido para BRL)',
+            'classe': 'rv_global_total_return',
+            'descricao': 'ETF iShares SP500 (preço USD convertido para BRL)',
         },
 
          # ─── Commodities (USD convertido para BRL) ──────────────
