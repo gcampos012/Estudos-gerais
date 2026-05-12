@@ -22,6 +22,7 @@ from core.data_loader import carregar_precos
 from analysis.markowitz import calcular_fronteira_eficiente
 from analysis.backtest import executar_backtest
 from visualization.backtest import plotar_backtest
+from analysis.metricas import retorno_equivalente_cdi
 
 CARTEIRA_DEFAULT = "carteiras/configs/balanceada.json"
 
@@ -149,6 +150,7 @@ def main() -> None:
         backtests_max_sharpe=backtests_max_sharpe,
         backtests_min_var=backtests_min_var,
         backtest_cdi=backtest_cdi,
+        cdi_anual=cdi_anual,
     )
     
     # ========================================================
@@ -187,35 +189,36 @@ def _imprimir_tabela_comparativa(
     backtests_max_sharpe: dict,
     backtests_min_var: dict,
     backtest_cdi: dict,
+    cdi_anual: float,
 ) -> None:
     """Imprime tabela comparativa de todas as estratégias."""
     
-    print("\n" + "═" * 90)
+    print("\n" + "═" * 102)
     print("📋 TABELA COMPARATIVA: TODAS AS ESTRATÉGIAS")
-    print("═" * 90)
+    print("═" * 102)
     
     cabecalho = (
         f"{'Carteira':<15} {'Estratégia':<14} "
-        f"{'Ret.Anual':>10} {'Volat':>8} {'MaxDD':>8} "
+        f"{'Ret.Anual':>10} {'Eq.CDI':>11} {'Volat':>8} {'MaxDD':>8} "
         f"{'Valor Final':>12} {'Custos':>10}"
     )
     print(cabecalho)
-    print("─" * 90)
+    print("─" * 102)  # 12 chars a mais por causa do Eq.CDI
     
     # Max Sharpe
     for estrategia, resultado in backtests_max_sharpe.items():
-        _imprimir_linha("Max Sharpe", estrategia, resultado)
+        _imprimir_linha("Max Sharpe", estrategia, resultado, cdi_anual)
     
     print()
     
     # Min Variância
     for estrategia, resultado in backtests_min_var.items():
-        _imprimir_linha("Min Variância", estrategia, resultado)
+        _imprimir_linha("Min Variância", estrategia, resultado, cdi_anual)
     
     print()
     
     # CDI
-    _imprimir_linha("CDI", "buy_and_hold", backtest_cdi)
+    _imprimir_linha("CDI", "buy_and_hold", backtest_cdi, cdi_anual)
     
     print("═" * 90)
     print("\n💡 Observações:")
@@ -224,14 +227,19 @@ def _imprimir_tabela_comparativa(
     print("   • Modelo simplificado: aliquota IR única, sem isenções")
 
 
-def _imprimir_linha(carteira: str, estrategia: str, resultado: dict) -> None:
+def _imprimir_linha(carteira: str, estrategia: str, resultado: dict, cdi_anual: float) -> None:
     """Imprime uma linha da tabela comparativa."""
     valor_final = resultado['valores'].iloc[-1]
     custos = resultado.get('custos', {}).get('total_custos', 0.0)
     
+    # Retorno equivalente em formato CDI+X%
+    spread = resultado['retorno_anualizado'] - cdi_anual
+    eq_cdi = f"CDI{'+' if spread >= 0 else '-'}{abs(spread):.2%}"
+    
     print(
         f"{carteira:<15} {estrategia:<14} "
         f"{resultado['retorno_anualizado']:>9.2%} "
+        f"{eq_cdi:>11} "
         f"{resultado['volatilidade_anualizada']:>7.2%} "
         f"{resultado['drawdown_maximo']:>7.2%} "
         f"R${valor_final:>9.2f} "

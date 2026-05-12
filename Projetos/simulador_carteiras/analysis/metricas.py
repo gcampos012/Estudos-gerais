@@ -144,3 +144,54 @@ def drawdown_maximo(retornos: pd.Series | pd.DataFrame) -> float | pd.Series:
     
     # 4. Pior drawdown = mínimo (valor mais negativo)
     return drawdown.min()
+
+# ============================================================
+# RETORNO EQUIVALENTE AO CDI
+# ============================================================
+
+def retorno_equivalente_cdi(
+    retorno_anual_carteira: float,
+    cdi_anual: float,
+) -> dict:
+    """
+    Expressa o retorno da carteira no formato "CDI±X%".
+    
+    Convenção do mercado brasileiro: investidores pensam retornos em termos
+    de spread sobre o CDI (ex: "fundo paga CDI+2%").
+    
+    Args:
+        retorno_anual_carteira: Retorno anualizado da carteira (ex: 0.1040 = 10.40%)
+        cdi_anual: CDI anualizado no mesmo período (ex: 0.0985 = 9.85%)
+    
+    Returns:
+        Dict com:
+        - 'cdi': taxa CDI anualizada (float)
+        - 'spread': diferença carteira - CDI (pode ser negativo)
+        - 'formato_texto': string formatada pronta pra print
+                          (ex: "CDI+0.55% (9.85% + 0.55%)")
+    
+    Exemplo:
+        >>> resultado = retorno_equivalente_cdi(0.1040, 0.0985)
+        >>> print(resultado['formato_texto'])
+        CDI+0.55% (9.85% + 0.55%)
+    """
+    spread = retorno_anual_carteira - cdi_anual
+    
+    # Sinal e operador pro formato
+    if spread >= 0:
+        sinal = '+'
+    else:
+        sinal = '-'
+    
+    spread_abs = abs(spread)
+    
+    formato_texto = (
+        f"CDI{sinal}{spread_abs:.2%} "
+        f"({cdi_anual:.2%} {sinal} {spread_abs:.2%})"
+    )
+    
+    return {
+        'cdi': cdi_anual,
+        'spread': spread,
+        'formato_texto': formato_texto,
+    }

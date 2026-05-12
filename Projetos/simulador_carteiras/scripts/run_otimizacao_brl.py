@@ -21,6 +21,7 @@ from carteiras.carteira_brl import load_carteira, get_tickers
 from core.data_loader import carregar_precos
 from analysis.markowitz import calcular_fronteira_eficiente
 from visualization.fronteira_eficiente import plotar_fronteira
+from analysis.metricas import retorno_equivalente_cdi
 
 
 # Caminho padrão quando o usuário não passa --config
@@ -102,8 +103,8 @@ def main() -> None:
     # ========================================================
     # 5. IMPRIMIR PESOS DOS PORTFÓLIOS ÓTIMOS
     # ========================================================
-    _imprimir_pesos("MAX SHARPE", resultado['max_sharpe'])
-    _imprimir_pesos("MIN VARIÂNCIA", resultado['min_variancia'])
+    _imprimir_pesos("MAX SHARPE", resultado['max_sharpe'], cdi_anual)
+    _imprimir_pesos("MIN VARIÂNCIA", resultado['min_variancia'], cdi_anual)
     
     # ========================================================
     # 6. PLOTAR E SALVAR GRÁFICO
@@ -122,7 +123,7 @@ def main() -> None:
     print(f"\n✅ Pipeline concluído com sucesso.\n")
 
 
-def _imprimir_pesos(titulo: str, portfolio: dict) -> None:
+def _imprimir_pesos(titulo: str, portfolio: dict, cdi_anual: float) -> None:
     """Imprime os pesos de um portfolio formatados."""
     print(f"\n" + "═" * 60)
     print(f"🎯 PORTFOLIO {titulo}")
@@ -130,6 +131,11 @@ def _imprimir_pesos(titulo: str, portfolio: dict) -> None:
     print(f"   Retorno anualizado:  {portfolio['retorno']:.2%}")
     print(f"   Volatilidade:        {portfolio['volatilidade']:.2%}")
     print(f"   Sharpe:              {portfolio['sharpe']:.2f}")
+    
+    # NOVO: retorno equivalente em formato CDI+X%
+    eq = retorno_equivalente_cdi(portfolio['retorno'], cdi_anual)
+    print(f"   Retorno Eq.:         {eq['formato_texto']}")
+    
     print(f"\n   Composição:")
     
     # Ordena pesos do maior pro menor pra leitura mais fácil

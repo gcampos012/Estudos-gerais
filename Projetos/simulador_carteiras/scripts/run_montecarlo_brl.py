@@ -27,6 +27,7 @@ from analysis.monte_carlo_bootstrap import simular_bootstrap
 from analysis.monte_carlo_normal import simular_normal
 from analysis._montecarlo_utils import aplicar_pesos_e_acumular
 from visualization.monte_carlo import plotar_comparativo
+from analysis.metricas import retorno_equivalente_cdi
 
 CARTEIRA_DEFAULT = "carteiras/configs/balanceada.json"
 
@@ -151,16 +152,22 @@ def main() -> None:
     print("\n" + "═" * 60)
     print(f"📈 RESUMO DAS PROJEÇÕES (após 1 ano)")
     print("═" * 60)
-    
+    print(f"   CDI anualizado: {cdi_anual:.2%}")
+
     for nome_carteira, metodos in trajetorias.items():
         print(f"\n🎯 {nome_carteira}")
         for nome_metodo, traj in metodos.items():
             valores_finais = traj[:, -1]
             p5, p50, p95 = np.percentile(valores_finais, [5, 50, 95])
+        
+            # Retorno do P50 em formato CDI+X%
+            retorno_p50 = p50 / VALOR_INICIAL - 1
+            eq = retorno_equivalente_cdi(retorno_p50, cdi_anual)
+        
             print(
                 f"   {nome_metodo:<10} "
                 f"P5: {p5:.1f} ({(p5/VALOR_INICIAL - 1):+.1%}) | "
-                f"P50: {p50:.1f} ({(p50/VALOR_INICIAL - 1):+.1%}) | "
+                f"P50: {p50:.1f} ({retorno_p50:+.1%}) [{eq['formato_texto']}] | "
                 f"P95: {p95:.1f} ({(p95/VALOR_INICIAL - 1):+.1%})"
             )
     
