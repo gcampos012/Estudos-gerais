@@ -19,8 +19,8 @@ Uso:
 from datetime import date
 
 import numpy as np
-
-from carteiras.carteira_brl import CARTEIRA, get_tickers
+import argparse
+from carteiras.carteira_brl import load_carteira, get_tickers
 from core.data_loader import carregar_precos
 from analysis.markowitz import calcular_fronteira_eficiente
 from analysis.monte_carlo_bootstrap import simular_bootstrap
@@ -28,6 +28,7 @@ from analysis.monte_carlo_normal import simular_normal
 from analysis._montecarlo_utils import aplicar_pesos_e_acumular
 from visualization.monte_carlo import plotar_comparativo
 
+CARTEIRA_DEFAULT = "carteiras/configs/balanceada.json"
 
 VALOR_INICIAL = 100.0  # carteira começa em 100 (visual mais limpo que 1.0)
 
@@ -35,19 +36,37 @@ VALOR_INICIAL = 100.0  # carteira começa em 100 (visual mais limpo que 1.0)
 def main() -> None:
     """Pipeline completo de Monte Carlo."""
     
-    print("\n" + "█" * 60)
-    print(f"█ MONTE CARLO — {CARTEIRA['nome'].upper()}")
-    print("█" * 60)
+    # ========================================================
+    # 0. PARSEAR ARGUMENTOS DA LINHA DE COMANDO
+    # ========================================================
+    parser = argparse.ArgumentParser(
+        description="Roda Monte Carlo de cenários futuros para uma carteira BRL.",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=CARTEIRA_DEFAULT,
+        help=f"Caminho do JSON de configuração da carteira "
+             f"(default: {CARTEIRA_DEFAULT})",
+    )
+    args = parser.parse_args()
     
     # ========================================================
-    # 1. CARREGAR DADOS E RODAR MARKOWITZ
+    # 1. CARREGAR CARTEIRA DO JSON
     # ========================================================
-    ativos = get_tickers()
-    benchmark = CARTEIRA['benchmark']
+    carteira = load_carteira(args.config)
+    
+    print("\n" + "█" * 60)
+    print(f"█ MONTE CARLO — {carteira['nome'].upper()}")
+    print("█" * 60)
+    print(f"📂 Config: {args.config}")
+    
+    ativos = get_tickers(carteira)
+    benchmark = carteira['benchmark']
     
     precos = carregar_precos(
         tickers=ativos + [benchmark],
-        data_inicio=CARTEIRA['data_inicio_default'],
+        data_inicio=carteira['data_inicio_default'],
         data_fim=date.today(),
     )
     

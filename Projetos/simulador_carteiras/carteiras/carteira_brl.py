@@ -1,76 +1,118 @@
 """
-Carteira de ativos brasileiros (BRL).
+Carregamento de carteiras a partir de arquivos JSON.
 
-Define a composição da carteira a ser analisada pelo simulador.
-A análise (Markowitz, Monte Carlo) lê esse dicionário e processa
-os ativos automaticamente, com os preços vindo do data_loader.
+As carteiras são definidas em arquivos JSON na pasta carteiras/configs/.
+Este módulo provê funções pra carregar e validar essas configurações.
 
-Para criar uma carteira nova, copie este arquivo e ajuste os campos.
+Exemplo de uso:
+    from carteiras.carteira_brl import load_carteira
+    
+    carteira = load_carteira("carteiras/configs/balanceada.json")
+    ativos = carteira['ativos']
+    benchmark = carteira['benchmark']
 """
 
+import json
 from datetime import date
+from pathlib import Path
 
-CARTEIRA = {
-    # Metadados (documentação pura, não interfere em cálculos)
-    'nome': 'Carteira Brasileira Diversificada',
-    'descricao': (
-        'Carteira multiclasse em reais com renda fixa e renda variável.'
-    ),
-    'moeda': 'BRL',
 
-    # Benchmark - usado para calcular Sharpe (não é ativo investido)
-    'benchmark': 'CDI',
+# Campos obrigatórios em todo JSON de carteira
+CAMPOS_OBRIGATORIOS = {'nome', 'benchmark', 'data_inicio_default', 'ativos'}
 
-    # Data padrão de início do histórico (pode ser sobrescrito por quem usa)
-    'data_inicio_default': date(2003, 1, 1),
 
-    # Lista de ativos investíveis
-    'ativos': [
-        #─── Renda Fixa ─────────────────────────────────────────
+def load_carteira(path: str | Path) -> dict:
+    """
+    Carrega uma carteira a partir de um arquivo JSON.
+    
+    Args:
+        path: Caminho do arquivo JSON (relativo ou absoluto).
+    
+    Returns:
+        Dict com a configuração da carteira:
         {
-            'ticker': 'SELIC',
-            'classe': 'rf_pos_fixado',
-            'descricao': 'Taxa Selic (pós-fixado, proxy de Tesouro Selic/CDB DI)',
-        },
-        {
-            'ticker': 'IMA-B',
-            'classe': 'rf_inflacao_geral',
-            'descricao': 'Carteira teórica de NTN-B (inflação, todos os prazos)',
-        },
-        {
-            'ticker': 'IMA-B 5 P2',
-            'classe': 'rf_inflacao_curta',
-            'descricao': 'Carteira teórica de NTN-B (prazos de até 5 anos)',
-        },
+            'nome': str,
+            'descricao': str (opcional),
+            'benchmark': str,
+            'data_inicio_default': date,   # convertido de string ISO
+            'ativos': list[str],
+        }
+    
+    Raises:
+        FileNotFoundError: Se o arquivo não existe.
+        ValueError: Se o JSON está mal formado ou faltam campos obrigatórios.
+    """
+    path = Path(path)
+    
+    # ============================================================
+    # 1. VALIDA EXISTÊNCIA
+    # ============================================================
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Arquivo de carteira não encontrado: {path}\n"
+            f"   Carteiras disponíveis em: carteiras/configs/"
+        )
+    
+    # ============================================================
+    # 2. LÊ E PARSEIA
+    # ============================================================
+    with open(path, 'r', encoding='utf-8') as f:
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"JSON inválido em {path}: {e}"
+            ) from e
+    
+    # ============================================================
+    # 3. VALIDA CAMPOS OBRIGATÓRIOS
+    # ============================================================
+    campos_presentes = set(config.keys())
+    campos_faltando = CAMPOS_OBRIGATORIOS - campos_presentes
+    
+    if campos_faltando:
+        raise ValueError(
+            f"Campos obrigatórios faltando em {path.name}: {campos_faltando}\n"
+            f"   Esperado: {CAMPOS_OBRIGATORIOS}"
+        )
+    
+    # ============================================================
+    # 4. VALIDA TIPOS
+    # ============================================================
+    if not isinstance(config['ativos'], list):
+        raise ValueError(f"'ativos' deve ser lista, não {type(config['ativos']).__name__}")
+    
+    if len(config['ativos']) == 0:
+        raise ValueError(f"'ativos' não pode ser lista vazia em {path.name}")
+    
+    if not all(isinstance(a, str) for a in config['ativos']):
+        raise ValueError(f"Todos os itens de 'ativos' devem ser strings")
+    
+    # ============================================================
+    # 5. CONVERTE data_inicio_default DE STRING PRA date
+    # ============================================================
+    try:
+        data_str = config['data_inicio_default']
+        config['data_inicio_default'] = date.fromisoformat(data_str)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"'data_inicio_default' deve ser string ISO (YYYY-MM-DD), "
+            f"recebido: {config.get('data_inicio_default')!r}"
+        ) from e
+    
+    return config
 
-        #─── Renda Variável Brasil ─────────────────────────────────────────
-        {
-            'ticker': 'DIVO11.SA',
-            'classe': 'rv_brasil_total_return',
-            'descricao': 'ETF de ações brasileiras',
-        },
-        
-        # ─── Renda Variável Internacional (em BRL) ──────────────
-        {
-            'ticker': 'VT',
-            'classe': 'rv_global_total_return',
-            'descricao': 'ETF iShares SP500 (preço USD convertido para BRL)',
-        },
 
-         # ─── Commodities (USD convertido para BRL) ──────────────
-        {
-            'ticker': 'GLD',
-            'classe': 'commodities_ouro',
-            'descricao': 'ETF de ouro (preço USD convertido para BRL)',
-        },
-    ],
-}
-
-def get_tickers() -> list[str]:
-    """Retorna apenas a lista de tickers (ativos investíveis)."""
-    return [ativo['ticker'] for ativo in CARTEIRA['ativos']]
-
-def get_tickers_com_benchmark() -> list[str]:
-    """Retorna lista de tickers + o benchmark (pra cerregar tudo de uma vez)."""
-    return get_tickers() + [CARTEIRA['benchmark']]
-
+def get_tickers(carteira: dict) -> list[str]:
+    """
+    Retorna a lista de tickers (ativos) da carteira.
+    
+    Função utilitária pra manter compatibilidade com código existente.
+    
+    Args:
+        carteira: Dict retornado por load_carteira()
+    
+    Returns:
+        Lista de tickers da carteira.
+    """
+    return list(carteira['ativos'])

@@ -14,29 +14,52 @@ Uso:
     python -m scripts.run_otimizacao_brl
 """
 
+import argparse
 from datetime import date
 
-from carteiras.carteira_brl import CARTEIRA, get_tickers
+from carteiras.carteira_brl import load_carteira, get_tickers
 from core.data_loader import carregar_precos
 from analysis.markowitz import calcular_fronteira_eficiente
 from visualization.fronteira_eficiente import plotar_fronteira
 
 
+# Caminho padrão quando o usuário não passa --config
+CARTEIRA_DEFAULT = "carteiras/configs/balanceada.json"
+
+
 def main() -> None:
     """Roda o pipeline completo de otimização."""
     
-    print("\n" + "█" * 60)
-    print(f"█ {CARTEIRA['nome'].upper()}")
-    print("█" * 60)
+    # ========================================================
+    # 0. PARSEAR ARGUMENTOS DA LINHA DE COMANDO
+    # ========================================================
+    parser = argparse.ArgumentParser(
+        description="Roda otimização Markowitz para uma carteira BRL.",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=CARTEIRA_DEFAULT,
+        help=f"Caminho do JSON de configuração da carteira "
+             f"(default: {CARTEIRA_DEFAULT})",
+    )
+    args = parser.parse_args()
     
     # ========================================================
-    # 1. CARREGAR DEFINIÇÕES
+    # 1. CARREGAR CARTEIRA DO JSON
     # ========================================================
-    ativos = get_tickers()
-    benchmark = CARTEIRA['benchmark']
+    carteira = load_carteira(args.config)
+    
+    print("\n" + "█" * 60)
+    print(f"█ {carteira['nome'].upper()}")
+    print("█" * 60)
+    print(f"📂 Config: {args.config}")
+    
+    ativos = get_tickers(carteira)
+    benchmark = carteira['benchmark']
     
     # TODO: tornar a janela configurável (argumentos CLI)
-    data_inicio = CARTEIRA['data_inicio_default']
+    data_inicio = carteira['data_inicio_default']
     data_fim = date.today()
     
     print(f"\n📋 Carteira: {len(ativos)} ativos + benchmark ({benchmark})")

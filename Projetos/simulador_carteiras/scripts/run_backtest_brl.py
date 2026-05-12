@@ -14,15 +14,16 @@ Uso:
     python -m scripts.run_backtest_brl
 """
 
-
+import argparse
 from datetime import date
 import pandas as pd
-from carteiras.carteira_brl import CARTEIRA, get_tickers
+from carteiras.carteira_brl import load_carteira, get_tickers
 from core.data_loader import carregar_precos
 from analysis.markowitz import calcular_fronteira_eficiente
 from analysis.backtest import executar_backtest
 from visualization.backtest import plotar_backtest
 
+CARTEIRA_DEFAULT = "carteiras/configs/balanceada.json"
 
 VALOR_INICIAL = 100.0
 
@@ -33,19 +34,37 @@ ESTRATEGIAS = ['buy_and_hold', 'mensal', 'trimestral', 'anual']
 def main() -> None:
     """Pipeline completo de backtest histórico."""
     
-    print("\n" + "█" * 60)
-    print(f"█ BACKTEST HISTÓRICO — {CARTEIRA['nome'].upper()}")
-    print("█" * 60)
+    # ========================================================
+    # 0. PARSEAR ARGUMENTOS DA LINHA DE COMANDO
+    # ========================================================
+    parser = argparse.ArgumentParser(
+        description="Roda backtest histórico para uma carteira BRL.",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=CARTEIRA_DEFAULT,
+        help=f"Caminho do JSON de configuração da carteira "
+             f"(default: {CARTEIRA_DEFAULT})",
+    )
+    args = parser.parse_args()
     
     # ========================================================
-    # 1. CARREGAR DADOS E RODAR MARKOWITZ
+    # 1. CARREGAR CARTEIRA DO JSON
     # ========================================================
-    ativos = get_tickers()
-    benchmark = CARTEIRA['benchmark']
+    carteira = load_carteira(args.config)
+    
+    print("\n" + "█" * 60)
+    print(f"█ BACKTEST HISTÓRICO — {carteira['nome'].upper()}")
+    print("█" * 60)
+    print(f"📂 Config: {args.config}")
+    
+    ativos = get_tickers(carteira)
+    benchmark = carteira['benchmark']
     
     precos = carregar_precos(
         tickers=ativos + [benchmark],
-        data_inicio=CARTEIRA['data_inicio_default'],
+        data_inicio=carteira['data_inicio_default'],
         data_fim=date.today(),
     )
     

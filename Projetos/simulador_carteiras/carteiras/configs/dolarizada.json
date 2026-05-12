@@ -1,0 +1,12 @@
+{
+  "nome": "Dolarizada (RV global + ouro)",
+  "descricao": "Carteira focada em ativos dolarizados (proteção cambial)",
+  "benchmark": "CDI",
+  "data_inicio_default": "2003-01-01",
+  "ativos": [
+    "VT",
+    "GLD",
+    "VOO",
+    "VXUS"
+  ]
+}
