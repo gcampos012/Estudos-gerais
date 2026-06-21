@@ -1,0 +1,12 @@
+{
+  "nome": "Conservadora (RF brasileira)",
+  "descricao": "Carteira focada em renda fixa brasileira (pós + inflação + rf pré)",
+  "benchmark": "CDI",
+  "data_inicio_default": "2003-01-01",
+  "ativos": [
+    "SELIC",
+    "IMA-B",
+    "IMA-B 5 P2",
+    "IRF-M"
+  ]
+}

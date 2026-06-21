@@ -1,0 +1,15 @@
+{
+  "nome": "Balanceada (7 ativos)",
+  "descricao": "Carteira diversificada com renda fixa brasileira + renda variável global + ouro",
+  "benchmark": "CDI",
+  "data_inicio_default": "2003-01-01",
+  "ativos": [
+    "SELIC",
+    "IMA-B",
+    "IMA-B 5 P2",
+    "DIVO11.SA",
+    "VT",
+    "GLD",
+    "IVV"
+  ]
+}

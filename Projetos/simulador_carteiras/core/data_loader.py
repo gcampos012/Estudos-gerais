@@ -26,6 +26,7 @@ Uso típico:
 # Imports bibliotecas nativas
 from datetime import date, datetime
 from pathlib import Path
+from dateutil.relativedelta import relativedelta
 
 # Imports de bibliotecas externas
 import pandas as pd
@@ -70,6 +71,16 @@ def _classificar_ticker(ticker: str) -> str:
     
     # Default: yfinance (cobre ações .SA, ETFs estrangeiros, etc)
     return 'yfinance'
+
+def _filtrar_por_data(df: pd.DataFrame, data_inicio: date, data_fim: date) -> pd.DataFrame:
+    """
+    Filtra um DataFrame pelo intervalo de datas (índice = data/timestamp).
+    
+    Converte data → Timestamp pra garantir compatibilidade com índices do pandas.
+    """
+    return df.loc[
+        pd.Timestamp(data_inicio):pd.Timestamp(data_fim)
+    ]
 
 # ============================================================
 # BLOCO 3 - LEITOR PARQUET ANBIMA (FROM MARKET_DATA)
@@ -120,64 +131,175 @@ def _ler_anbima(indices: list[str]) -> pd.DataFrame:
     return df_wide
 
 # ============================================================
-# BLOCO 4 - BAIXAR SERIES TEMPORAIS DO BCB VIA API PUBLICA
+# BLOCO 4 - DOWNLOAD DE DADOS DO BCB (com cache)
 # ============================================================
 
-def _baixar_bcb(codigo: int, nome: str, data_inicio: date, data_fim: date) -> pd.Series:
-    """
-    Baixa uma série temporal do Sistema Gerenciador de Séries (SGS) do BCB.
+_CACHE_BCB = CACHE_DIR/"cache_bcb.parquet"
+
+def _cache_bcb_valido() -> bool:
+    """Verifica se o cache do BCB existe e foi gerado hoje."""
+    if not _CACHE_BCB.exists():
+        return False
     
-    Args:
-        codigo: Código da série no SGS (ex: 11 para Selic, 12 para CDI)
-        nome: Nome amigável do ticker (ex: 'SELIC') - vira o nome da Series
-        data_inicio: Data inicial da série
-        data_fim: Data final da série
+    mtime = _CACHE_BCB.stat().st_mtime
+    data_mod = datetime.fromtimestamp(mtime).date()
+    return data_mod == date.today()
+
+
+def _ler_cache_bcb(tickers: list[str]) -> pd.DataFrame | None:
+    """
+    Tenta ler o cache do BCB.
     
     Returns:
-        Series com índice = data e valores = taxa/cotação.
-        IMPORTANTE: Para SELIC/CDI, retorna a TAXA DIÁRIA EM %, não índice acumulado.
-    
-    Raises:
-        requests.HTTPError: Se a API do BCB retornar erro.
+        DataFrame se cache é válido E contém TODOS os tickers solicitados.
+        None se cache não existe, está desatualizado, ou falta algum ticker.
     """
+    if not _cache_bcb_valido():
+        return None
     
-    # Monta URL no formato esperado pelo BCB
+    df_cache = pd.read_parquet(_CACHE_BCB)
+    
+    tickers_no_cache = set(df_cache.columns)
+    if not set(tickers).issubset(tickers_no_cache):
+        return None  # falta algum ticker
+    
+    print(f"💾 Cache BCB válido (gerado hoje), usando.")
+    return df_cache[tickers]
+
+
+def _carregar_cache_bcb_existente() -> pd.DataFrame:
+    """
+    Carrega o cache BCB se for válido (do dia).
+    Retorna DataFrame vazio se não existir/estiver desatualizado.
+    
+    Diferente de _ler_cache_bcb: NÃO valida tickers, retorna o que tem.
+    """
+    if not _cache_bcb_valido():
+        return pd.DataFrame()
+    return pd.read_parquet(_CACHE_BCB)
+
+def _baixar_bcb_chunk(codigo: int, data_inicio: date, data_fim: date) -> pd.DataFrame:
+    """
+    Faz UMA requisição ao BCB pro intervalo dado.
+    
+    Função interna usada pelo _baixar_bcb pra fazer chunking quando
+    o intervalo é maior que o limite da API.
+    """
     url = (
-        f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados?formato=json"
+        f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados"
+        f"?formato=json"
         f"&dataInicial={data_inicio.strftime('%d/%m/%Y')}"
         f"&dataFinal={data_fim.strftime('%d/%m/%Y')}"
     )
     
-    print(f"🌐 Baixando {nome} do BCB (código {codigo})...")
-
-    # Faz a requisição
     response = requests.get(url, timeout=30)
-    response.raise_for_status() # erro se status != 200
-
-    # Parse do JSON
-    dados = response.json()
-
-    if not dados:
-         raise ValueError(f"BCB Retornou vazio para o código {codigo}. Verifique datas")
+    response.raise_for_status()
     
-    # Converte em dataframe temporário para processamento de colunas
+    dados = response.json()
+    
+    if not dados:
+        return pd.DataFrame(columns=['data', 'valor'])  # vazio mas válido
+    
     df = pd.DataFrame(dados)
-
-    # Processa colunas
     df['data'] = pd.to_datetime(df['data'], format='%d/%m/%Y')
     df['valor'] = pd.to_numeric(df['valor'])
+    
+    return df
 
-    # Cria Series Final (com índice = data, valores = valor)
-
-    serie = pd.Series(
-        data=df['valor'].values, # usamos o .values para o pandas extrair o array puro da coluna toda
-        index=df['data'],
-        name=nome,
-    )
-
-    print(f" ✅ {len(serie)} registros de {serie.index.min().date()} até {serie.index.max().date()}")
-
-    return serie
+def _baixar_bcb_multiplos(
+    tickers: list[str],
+    data_inicio: date,
+    data_fim: date,
+) -> pd.DataFrame:
+    """
+    Baixa múltiplas séries do BCB com cache ACUMULATIVO e chunking automático.
+    
+    Estratégia de cache:
+    - Se TODOS os tickers solicitados já estão no cache válido → usa cache
+    - Se alguns faltam → baixa SÓ os que faltam, mescla com o cache existente
+    - Cache acumula ao longo do dia (não sobrescreve)
+    
+    Args:
+        tickers: Lista de tickers do BCB_CODIGOS
+        data_inicio: Data inicial
+        data_fim: Data final
+    
+    Returns:
+        DataFrame com colunas = tickers solicitados, índice = data.
+    """
+    # 1. Tenta cache completo primeiro (caso comum)
+    df_cache = _ler_cache_bcb(tickers)
+    if df_cache is not None:
+        return _filtrar_por_data(df_cache, data_inicio, data_fim)
+    
+    # 2. Cache inválido ou incompleto - vamos investigar
+    cache_existente = _carregar_cache_bcb_existente()
+    
+    if not cache_existente.empty:
+        # Cache existe e é do dia, mas faltam tickers - identifica o que falta
+        tickers_no_cache = set(cache_existente.columns)
+        tickers_faltando = [t for t in tickers if t not in tickers_no_cache]
+        print(f"💾 Cache BCB parcial: já tem {sorted(tickers_no_cache)}, falta {tickers_faltando}")
+    else:
+        # Cache não existe ou é de outro dia - baixa tudo
+        tickers_faltando = list(tickers)
+        print(f"🌐 Sem cache BCB válido, baixando {len(tickers_faltando)} série(s).")
+    
+    # 3. Baixa SÓ os tickers que faltam (com chunking)
+    series_novas = {}
+    for ticker in tickers_faltando:
+        codigo = BCB_CODIGOS[ticker]
+        print(f"   📊 {ticker} (código {codigo})...")
+        
+        chunks = []
+        inicio_chunk = data_inicio
+        LIMITE_ANOS_POR_CHUNK = 8
+        
+        while inicio_chunk <= data_fim:
+            fim_chunk = inicio_chunk + relativedelta(years=LIMITE_ANOS_POR_CHUNK)
+            if fim_chunk > data_fim:
+                fim_chunk = data_fim
+            
+            df_chunk = _baixar_bcb_chunk(codigo, inicio_chunk, fim_chunk)
+            if not df_chunk.empty:
+                chunks.append(df_chunk)
+            
+            inicio_chunk = fim_chunk + relativedelta(days=1)
+        
+        if not chunks:
+            raise ValueError(f"BCB retornou vazio para {ticker} (código {codigo}).")
+        
+        df_completo = pd.concat(chunks, ignore_index=True)
+        df_completo = df_completo.drop_duplicates(subset=['data'])
+        
+        series_novas[ticker] = pd.Series(
+            data=df_completo['valor'].values,
+            index=df_completo['data'],
+            name=ticker,
+        )
+    
+    df_novos = pd.DataFrame(series_novas)
+    
+    # 4. Aplica transformação de taxa em índice acumulado (SELIC/CDI)
+    TICKERS_TAXA = {'SELIC', 'CDI'}
+    for col in df_novos.columns:
+        if col in TICKERS_TAXA:
+            taxa_diaria_decimal = df_novos[col] / 100
+            df_novos[col] = (1 + taxa_diaria_decimal).cumprod()
+    
+    # 5. MESCLA com cache existente (não sobrescreve!)
+    if not cache_existente.empty:
+        df_atualizado = pd.concat([cache_existente, df_novos], axis=1)
+    else:
+        df_atualizado = df_novos
+    
+    # 6. Salva o cache acumulado
+    _CACHE_BCB.parent.mkdir(parents=True, exist_ok=True)
+    df_atualizado.to_parquet(_CACHE_BCB)
+    print(f"💾 Cache BCB atualizado (agora com: {sorted(df_atualizado.columns)})")
+    
+    # 7. Retorna apenas os tickers solicitados, filtrados por data
+    return _filtrar_por_data(df_atualizado[tickers], data_inicio, data_fim)
 
 # ============================================================
 # BLOCO 5 - BAIXAR PREÇOS DO YFINANCE, COM CACHE LOCAL 
@@ -236,7 +358,7 @@ def _baixar_yfinance(tickers: list[str], data_inicio: date, data_fim: date) -> p
     # Tenta usar cache primeiro
     df_cache = _ler_cache_yfinance(tickers)
     if df_cache is not None:
-        return df_cache
+        return _filtrar_por_data(df_cache, data_inicio, data_fim)
     
     # Cache inválido ou incompleto: baixa de novo
     print(f"🌐 Baixando {len(tickers)} tickers do yfinance: {tickers}")
@@ -271,8 +393,8 @@ def _baixar_yfinance(tickers: list[str], data_inicio: date, data_fim: date) -> p
     _CACHE_YFINANCE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(_CACHE_YFINANCE)
     print(f"💾 Cache atualizado em {_CACHE_YFINANCE.name}")
-    
-    return df
+
+    return _filtrar_por_data(df, data_inicio, data_fim)
 
 # ============================================================
 # BLOCO 6 - CONVERTER SÉRIE DE PREÇOS EM USD EM BRL 
@@ -374,54 +496,50 @@ def carregar_precos(
         print(f"\n[ANBIMA]")
         df_anbima = _ler_anbima(tickers_anbima)
         # Filtra pelo intervalo de datas
-        df_anbima = df_anbima.loc[data_inicio:data_fim]
+        df_anbima = _filtrar_por_data(df_anbima, data_inicio, data_fim)
         pedacos.append(df_anbima)
         print(f"🌐 Baixando dados de {len(tickers_anbima)} ativo(s)...")
         print(f"✅ {len(df_anbima)} registros encontrados, de {df_anbima.index.min().date()} até {df_anbima.index.max().date()}")
     
-    # BCB
-    series_bcb = {} # cache local para reusar USD_BRL na conversão
+    # BCB (SELIC, CDI, USD_BRL) - busca múltiplas séries de uma vez
+    series_bcb = {}
     if tickers_bcb:
-       print(f"\n[BCB]")
-       for ticker in tickers_bcb:
-           codigo = BCB_CODIGOS[ticker]
-           serie = _baixar_bcb(codigo, ticker, data_inicio, data_fim)
-           series_bcb[ticker] = serie
-           pedacos.append(serie)
+        print(f"\n[BCB]")
+        df_bcb = _baixar_bcb_multiplos(tickers_bcb, data_inicio, data_fim)
+        for ticker in tickers_bcb:
+            series_bcb[ticker] = df_bcb[ticker]
+            pedacos.append(df_bcb[ticker])
     
     # yfinance
     df_yf = None
     if tickers_yfinance:
-       print(f"\n[YFINANCE]")
-       df_yf = _baixar_yfinance(tickers_yfinance, data_inicio, data_fim)
-
+        print(f"\n[YFINANCE]")
+        df_yf = _baixar_yfinance(tickers_yfinance, data_inicio, data_fim)
+    
     # ============================================================
     # FASE 3: Aplicar a conversão USD->BRL onde necessário
     # ============================================================
-
     if df_yf is not None:
-       # Detecta tickers sem .SA (assumidos como USD)
-       tickers_usd = [t for t in tickers_yfinance if not t.endswith('.SA')]
-
-    if tickers_usd:
-        print(f"\n[CONVERSÃO USD → BRL]")
-        print(f"   Tickers em USD: {tickers_usd}")
-
-        # garante que USD_BRL está disponível
-        if 'USD_BRL' in series_bcb:
-            cotacao = series_bcb['USD_BRL']
-        else:
-            # Não foi pedido pelo usuário, mas precisamos baixar
-            cotacao = _baixar_bcb(
-                BCB_CODIGOS['USD_BRL'], 'USD_BRL', data_inicio, data_fim
-            )
+        # Detecta tickers sem .SA (assumidos como USD)
+        tickers_usd = [t for t in tickers_yfinance if not t.endswith('.SA')]
         
-        # Converte cada ticker USD
-        for ticker in tickers_usd:
-            print(f"   🔄 Convertendo {ticker}...")
-            df_yf[ticker] = _converter_para_brl(df_yf[ticker], cotacao)
-    
-    pedacos.append(df_yf)
+        if tickers_usd:
+            print(f"\n[CONVERSÃO USD → BRL]")
+            print(f"   Tickers em USD: {tickers_usd}")
+            
+            # Garante que USD_BRL está disponível
+            if 'USD_BRL' in series_bcb:
+                cotacao = series_bcb['USD_BRL']
+            else:
+                df_usd = _baixar_bcb_multiplos(['USD_BRL'], data_inicio, data_fim)
+                cotacao = df_usd['USD_BRL']
+            
+            # Converte cada ticker USD
+            for ticker in tickers_usd:
+                print(f"   🔄 Convertendo {ticker}...")
+                df_yf[ticker] = _converter_para_brl(df_yf[ticker], cotacao)
+        
+        pedacos.append(df_yf)
 
     # ============================================================
     # FASE 4: Juntar tudo num DataFrame

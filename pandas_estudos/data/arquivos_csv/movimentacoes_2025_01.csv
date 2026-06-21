@@ -1,0 +1,6 @@
+data,id_cliente,operacao,ativo,quantidade,valor_unitario
+2025-01-03,101,Compra,PETR4,200,38.5
+2025-01-08,102,Compra,CDB Santander,1,50000.0
+2025-01-15,104,Venda,Tesouro Selic 2027,1,12450.3
+2025-01-22,101,Compra,VALE3,150,65.2
+2025-01-29,105,Compra,LCI Bradesco,1,30000.0

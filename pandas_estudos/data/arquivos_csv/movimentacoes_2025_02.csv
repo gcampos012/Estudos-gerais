@@ -1,0 +1,5 @@
+data,id_cliente,operacao,ativo,quantidade,valor_unitario
+2025-02-04,103,Compra,HGLG11,80,165.4
+2025-02-11,102,Compra,Tesouro IPCA+ 2035,1,3850.75
+2025-02-18,107,Venda,PETR4,100,39.8
+2025-02-25,101,Venda,ITUB4,300,28.1
