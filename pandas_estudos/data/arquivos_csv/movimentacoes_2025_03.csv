@@ -1,0 +1,6 @@
+data,id_cliente,operacao,ativo,quantidade,valor_unitario
+2025-03-05,104,Compra,Debênture VALE,1,25000.0
+2025-03-12,105,Compra,CDB Santander,1,30000.0
+2025-03-19,102,Venda,CDB Santander,1,50125.4
+2025-03-26,107,Compra,MGLU3,500,8.5
+2025-03-31,103,Compra,BBDC4,200,14.95
